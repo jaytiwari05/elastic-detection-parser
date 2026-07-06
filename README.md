@@ -11,6 +11,10 @@ python elastic_analyzer.py <alert.json>
 python elastic_analyzer.py <alert.json> --no-pull   # skip git pull on the artifacts repo
 python elastic_analyzer.py <alert.json> --no-color  # plain output, no ANSI colors
 ```
+<img width="1521" height="823" alt="01" src="https://github.com/user-attachments/assets/ad4f5916-3acd-4265-8bfa-c0599bde12d2" />
+
+<img width="1455" height="865" alt="02" src="https://github.com/user-attachments/assets/b526cebf-8415-452a-ab64-6d054045e688" />
+
 
 The input can be a single alert object or a JSON array of alerts (a full Kibana export).
 

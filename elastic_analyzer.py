@@ -7,6 +7,8 @@ Usage:
     python elastic_analyzer.py <alert.json>
     python elastic_analyzer.py <alert.json> --no-pull   # skip git pull
     python elastic_analyzer.py <alert.json> --no-color
+
+Author: PaiN05
 """
 
 import json, sys, os, re, io, subprocess
@@ -62,6 +64,17 @@ SEV_C    = lambda: _status('CRITICAL', '45', WH)
 SEV_M    = lambda: _status('MEDIUM',   '43', WH)
 
 W = 78
+
+BANNER = r""" ___ _      _   ___ _____ ___ ___     _   _  _   _   _ __   _________ ___
+| __| |    /_\ / __|_   _|_ _/ __|   /_\ | \| | /_\ | |\ \ / /_  / __| _ \
+| _|| |__ / _ \\__ \ | |  | | (__   / _ \| .` |/ _ \| |_\ V / / /| _||   /
+|___|____/_/ \_\___/ |_| |___\___| /_/ \_\_|\_/_/ \_\____|_| /___|___|_|_\
+""".rstrip("\n")
+
+def banner():
+    print(f"{c(B,CY)}{BANNER}{c(r())}")
+    print(f"{c(D)}{'Author : PaiN05'.center(W)}{c(r())}")
+    print(f"{c(D)}{'─'*W}{c(r())}")
 
 def div(title=''):
     if title:
@@ -674,12 +687,13 @@ def analyze(data, no_pull=False):
 def main():
     global COLOR
     args = sys.argv[1:]
+    if '--no-color' in args: COLOR = False
+    banner()
     if not args or '-h' in args or '--help' in args:
         print(__doc__); sys.exit(0)
     json_file = args[0]
     no_pull   = '--no-pull'   in args
     no_color  = '--no-color'  in args
-    if no_color: COLOR = False
 
     if not os.path.isfile(json_file):
         print(f"not found: {json_file}", file=sys.stderr); sys.exit(1)

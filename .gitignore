@@ -1,0 +1,12 @@
+# auto-cloned by elastic_analyzer.py on first run — not tracked
+protections-artifacts/
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# samples may contain sensitive alert data — exclude by default
+# remove this line if you want to commit your own sample JSONs
+samples/

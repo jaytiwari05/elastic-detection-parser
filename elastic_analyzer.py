@@ -242,11 +242,11 @@ def explain_eql(query, src, toml_meta):
         matched, evidence, detail = ev
 
         if is_not:
-            # exclusion: if matched = excluded → would have been a miss
+            # exclusion: if matched = excluded → condition fails; else it passes
             if matched:
-                status = 'miss'  # exclusion applied — should not have fired
+                status = 'exclude_hit'   # would have suppressed the alert
             else:
-                status = 'skip'  # exclusion didn't apply — this is why it still fired
+                status = 'skip'          # exclusion didn't apply — part of why it fired
         else:
             status = 'match' if matched else 'miss'
 
@@ -282,6 +282,14 @@ def _split_eql_conditions(body):
     if buf: parts.append(''.join(buf).strip())
     return [p for p in parts if p]
 
+def _eql_match(sym, pattern):
+    """EQL wildcard match: `*` = any chars, `?` = one char. Anchored, case-insensitive."""
+    rx = ''.join('.*' if ch == '*' else '.' if ch == '?' else re.escape(ch) for ch in pattern)
+    try:
+        return bool(re.fullmatch(rx, sym, re.I | re.S))
+    except re.error:
+        return False
+
 def _eval_condition(cond, proc, dll, f_dat, stack, summary):
     """
     Try to evaluate a single EQL condition against alert data.
@@ -309,17 +317,33 @@ def _eval_condition(cond, proc, dll, f_dat, stack, summary):
         matched = bool(re.search(pattern, summary, re.I))
         return matched, f'summary="{summary}"', ''
 
-    # _arraysearch(process.thread.Ext.call_stack, ...) with symbol_info wildcard
-    m = re.search(r'\$entry\.symbol_info\s*:\s*\((.+?)\)', cond, re.S)
-    if m and '_arraysearch' in cond and 'call_stack' in cond:
-        patterns = [p.strip().strip('"').replace('*','.*') for p in m.group(1).split(',')]
-        found = None
-        for frame in stack:
-            if not isinstance(frame, dict): continue
-            sym = frame.get('symbol_info', '')
-            if any(re.match(p, sym, re.I) for p in patterns):
-                found = sym; break
-        return bool(found), f'frame: {found}' if found else 'no matching frame', ''
+    # _arraysearch(process.thread.Ext.call_stack, ...) with symbol_info : (...) or like
+    if '_arraysearch' in cond and 'call_stack' in cond:
+        m = re.search(r'\$entry\.symbol_info\s*(?::\s*\(|like\s+"|:\s*")(.+?)(?:\)|")', cond, re.S)
+        if m:
+            patterns = [p.strip().strip('"') for p in
+                        re.findall(r'"([^"]*)"', m.group(1))] or [m.group(1).strip()]
+            found = None
+            for frame in stack:
+                if not isinstance(frame, dict): continue
+                sym = frame.get('symbol_info', '')
+                if any(_eql_match(sym, p) for p in patterns):
+                    found = sym; break
+            return bool(found), f'frame: {found}' if found else 'no matching frame', ''
+
+    # process.executable != null
+    if re.match(r'process\.executable\s*!=\s*null', cond):
+        exe = sg(proc, 'executable')
+        return exe != '—', f'process.executable={exe}', ''
+
+    # stringcontains~(process.thread.Ext.call_stack_summary, process.name)
+    m = re.match(r'stringcontains~\(\s*process\.thread\.Ext\.call_stack_summary\s*,\s*process\.name\s*\)', cond)
+    if m:
+        pname = sg(proc, 'name', default='')
+        matched = pname.lower() in summary.lower()
+        if matched:
+            return matched, f'summary contains "{pname}"', ''
+        return matched, f'summary does not contain "{pname}"', ''
 
     # process.name : ("a", "b") or process.name in (...)
     m = re.match(r'process\.name\s*(?:in\s*\(|:\s*\()(.+?)\)', cond, re.S)
@@ -329,13 +353,14 @@ def _eval_condition(cond, proc, dll, f_dat, stack, summary):
         matched = pname.lower() in [n.lower() for n in names]
         return matched, f'process.name="{pname}"', f'list: {", ".join(names[:4])}'
 
-    # dll.name in (...) or dll.name : "..."
-    m = re.match(r'dll\.name\s*(?:in\s*\(|:\s*"?)(.+?)(?:\)|")', cond)
+    # dll.name in (...) or dll.name : "..." / ("a", "b")
+    m = re.match(r'dll\.name\s*(?:in\s*\(|:\s*)(.+?)(?:\)|$)', cond, re.S)
     if m:
         names = re.findall(r'"([^"]+)"', m.group(0))
         dname = sg(dll, 'name', default='')
         matched = dname.lower() in [n.lower() for n in names]
-        return matched, f'dll.name="{dname}"', f'excluded: {", ".join(names)}'
+        detail = f'dll list ({len(names)}): {", ".join(names[:6])}' if names else ''
+        return matched, f'dll.name="{dname}"', detail
 
     # process.name : ("msedge.exe", ...) combined check
     m = re.search(r'process\.name\s*:\s*\((.+?)\)', cond)
@@ -553,9 +578,12 @@ def analyze(data, no_pull=False):
                 tag = SKIPD()
                 col = D
             elif status == 'miss':
-                # exclusion that fired — this would stop detection
-                tag = _status('EXCL', '42', WH)
+                tag = _status('NO', '41', WH)
                 col = D
+            elif status == 'exclude_hit':
+                # exclusion that matched — this would suppress the alert, contradiction
+                tag = _status('EXCL', '42', WH)
+                col = YE
             else:
                 tag = f"  {c(D)}[?]{c(r())}"
                 col = D
